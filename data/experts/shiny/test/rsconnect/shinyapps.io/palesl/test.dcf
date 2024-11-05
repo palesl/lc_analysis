@@ -1,0 +1,12 @@
+name: test
+title: test
+username: palesl
+account: palesl
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 9925740
+bundleId: 7760413
+url: https://palesl.shinyapps.io/test/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE

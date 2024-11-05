@@ -1,0 +1,2 @@
+load("/Users/pat/Library/CloudStorage/Dropbox/2021_ARC_Pathways to Power/Legislative Quality/Methodology/data/sentiment/sentiment_02_scraped_references.rds")
+load("/Users/pat/Library/CloudStorage/Dropbox/2021_ARC_Pathways to Power/Legislative Quality/Methodology/data/sentiment/sentiment_03_intent_human_flan_test.rds")

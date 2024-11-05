@@ -1,0 +1,286 @@
+---
+title: 'Supplemental Appendix for: The Quality of Legislation'
+author: "Patrick Leslie and Keith Dowding"
+date: "`r Sys.Date()`"
+output: 
+  bookdown::word_document2:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    extra_dependencies: "subfig"
+header-includes:
+   - \usepackage{mathtools}
+   - \setlength{\parindent}{4em}
+   - \setlength{\parskip}{0em}
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+pacman::p_load(tidyverse, ausleg, flextable, gridExtra, RColorBrewer)
+# knitr::opts_knit$set(root.dir = '~/Library/CloudStorage/Dropbox/2021_ARC_Pathways to Power/Legislative Quality/Methodology')
+
+source('amends_01_reshape_data.R')
+source('amends_03_binomials.R')
+```
+
+This document provides a repository for the analysis done on measuring the quality of legislation, from the point of view of multiple enactments to legislation in the same term.
+
+# A1: Tests for over-dispersion
+
+Using a test statistic suggested by @hjort2018, we construct a series of one-tailed Wald tests for over-dispersion at the $\alpha=.05$ and $\alpha=0.01$ levels. The test distribution is constructed from:
+
+$$
+W_n=\frac{S^2_n}{m \hat p_0(1-\hat p_0)},
+$$
+
+where $W_n$ is the variance from a binomial distribution randomly generated ($S^2_n$) with the same parameters as our observed data ($n$, the number of enactments, and $p=1/e$, the number of acts on the statute book), over the expected variance from the theoretical binomial distribution with the same parameters ($m \hat p_0(1-\hat p_0)$). After 1000 simulations, the 95th and 99th percentile of the sampling distribution were compared with the ratio of our observed distribution variance and $m \hat p_0(1-\hat p_0)$. Where the observed ratio is greater, we conclude that over-dispersion exists in the observed data for the given percentile threshold. As Table \@ref(tab:dispersionTests) demonstrates, over-dispersion likely exists at the 95% level in a few time periods since 1901, with all parliaments since the 30th (ending 1977) indicating over-dispersion. At the 99% level, no parliaments before the 32nd parliament (beginning in 1980) were over-dispersed, while each subsequent parliament was over-dispersed.
+
+```{r dispersionTests}
+ 
+ 
+flextable(sim_vars_test)|>set_caption( caption = "One-Tailed over-dispersion tests")|>
+  autofit()|> colformat_double(digits = 2)|>
+  set_header_labels( parliament="Parliament",
+  obs_ratio = "Obs. Ratio",
+  pctile_0_95 = "95th Percentile", 
+  pctile_0_99 = "95th Percentile",
+  overdispersed95 = "Over-dispersed (95%)",
+  overdispersed99 = "Over-dispersed (99%)"
+)
+  
+
+```
+
+# 'Multiple Enactments' measure of legislative quality
+
+This section provides descriptive analysis and full regression tables for our analysis of early amendments in the Australian parliament. We define early amendments as amendments made to a piece of legislation before the end of the term in which it was enacted. We begin with descriptive statistics, tracing principal acts, amending acts, and amendments within the first term, since 1901.
+
+## Descriptive statistics
+
+First, we begin with a descriptive account of Acts of Parliament since federation.
+
+```{r actsfig, fig.cap="Acts of Parliament, by principal and amending acts (1901-2022)"}
+
+acts<-ausleg::alrc_as_made(leg_type = "Acts")
+
+by_parliament<-acts|>group_by(parliament, amendingPrincipal)|>
+  summarise(n_enacted=n())
+
+by_parliament$parliament<-as.numeric(by_parliament$parliament)
+
+#excluding current parliament
+by_parliament<-by_parliament[by_parliament$parliament!=47,]
+
+ggplot(data=by_parliament, aes(parliament,n_enacted, linetype=amendingPrincipal))+
+  geom_line()+ylab("Acts enacted")+
+  xlab("Parliament #")+theme_bw()+
+  theme(legend.title = element_blank())
+
+```
+
+Figure \@ref(fig:actsfig) shows the enactment of new and amending legislation since 1901. The figure shows that principal acts peaked in the 27th (1969-72) and 36th (1990-1993) parliaments, and have since declined to around half the number per term. The passage of amending acts, meanwhile has increased to overtake the passage of amendments by a wide margin. As the proliferation of new acts in the 20th century reflects expansion of the scale and scope of federal governance, the rise of amending acts reflects a period of consolidation.
+
+```{r actstab}
+
+
+acts$decade<-paste0(substr(as.character(acts$assent), 1,3),"0s")
+by_decade<-acts|>group_by(decade, amendingPrincipal)|>
+  summarise(n_enacted=n())
+
+by_decade_tab<-by_decade|>pivot_wider(names_from=amendingPrincipal,
+                                          id_cols=decade,
+                                          values_from = n_enacted
+                                          )|>
+  arrange(decade)
+
+by_decade_tab$ratio_amend_prin <- by_decade_tab$Amending/
+  by_decade_tab$Principal 
+
+by_decade_tab$ratio_amend_prin<-round(by_decade_tab$ratio_amend_prin,
+                                          digits=2)
+
+ft <- flextable(by_decade_tab)
+ft <- theme_vanilla(ft)
+ft <- set_caption(ft, caption = "Principal and amending Acts of Parliament, by decade.")
+ft <- ft|>autofit()
+ft
+
+```
+
+Table \@ref(tab:actstab) displays the number of acts enacted in each decade since 1901, also including the ratio of amending Acts of Parliament to principal Acts. As the table demonstrates, the preponderance of modern law making applies to the enactment of amendments to pre-existing legislation. The last parliament in which there were more principal acts than amending acts was the 29th parliament, cut short by the dismissal of Prime Minister Gough Whitlam in 1975. For this reason, our model counts all acts, both principal and amending, as candidates for early amendment: that is, amendments to legislation can themselves be amended before the end of a parliamentary term, and we capture this in our modelling strategy.
+
+We classify additional enactment events in terms of the number of amendments made within a single parliamentary term as in Table \@ref(tab:classification). We therefore capture an amendments to the first enactment of a Principal Act, or multiple amendments to an Act that was first assented to in a prior legislative term. Note that we do not classify acts where there are no enactment events for an existing piece of legislation in a given parliamentary term. We therefore restrict our modelling question to: given the choice to enact on a piece of primary legislation once, what is the probability that the legislation will receive an amendment before the end of the parliamentary term? We find that the choice to make multiple enactment events is quite common, with roughly one third of Acts receiving two or more enactment events in a parliamentary term.
+
++-------------------------------------------------------------------------------+----------------------+-------------------+
+| Enactment event                                                               | Number of enactments | Frequency in data |
++===============================================================================+:====================:+:=================:+
+| Enactment of principal event, without amendment.                              | 1                    | 9050              |
+|                                                                               |                      |                   |
+| OR                                                                            |                      |                   |
+|                                                                               |                      |                   |
+| Enactment of a single amendment to a principal act from a prior term.         |                      |                   |
++-------------------------------------------------------------------------------+----------------------+-------------------+
+|                                                                               |                      |                   |
++-------------------------------------------------------------------------------+----------------------+-------------------+
+| Enactment of an amendment in the same term as the principal act.              | 2+                   | 5475              |
+|                                                                               |                      |                   |
+| OR                                                                            |                      |                   |
+|                                                                               |                      |                   |
+| Two or more amendments in the same term to a principal act from a prior term. |                      |                   |
++-------------------------------------------------------------------------------+----------------------+-------------------+
+
+: (#tab:classification) Classification of enactment events, by parliamentary term.
+
+```{r earlyamenddesc, fig.cap="early amendments", fig.ncol = 2, out.width = "50%", fig.align = "center", fig.subcap=c('Histogram of amendments','Amendments over time', 'Pr(Acts with multiple amendments in the same term)')}
+
+ 
+p1h<-ggplot(data = model_set , aes( number_enactments))+
+  geom_histogram(binwidth = 1)+theme_bw()+xlab('# Enactments')
+
+p1<-ggplot(data = model_set , aes(parliament, number_enactments))+
+  geom_jitter(alpha=0.1)+geom_smooth( )+theme_bw()+xlab('Parliament #')
+
+
+
+
+p2<-ggplot(data = model_set , aes(parliament, multiple_amends))+
+geom_jitter(alpha=0.02, height=0.02)+  geom_smooth( )+
+  theme_bw()+xlab('Parliament #')
+
+p1h
+p1
+p2
+
+# give number of acts in each classification bracket for Table @ref(tab:classification) 
+#table(model_set$multiple_amends)
+
+```
+
+Descriptive statistics of amendments to legislation made within the first term of enactment are given in Figure \@ref(fig:earlyamenddesc). As panel c shows, the number of multiple enactment events to a principal act is rising over time.
+
+It is plausible that many such amendments are making minor amendments to many principal acts, as in omnibus amendment acts. To account for this, we construct an importance weight for multiple enactment events that we apply to the classification in Table \@ref(tab:classification). For each multiple enactment event $a_j$, we apply a weight $W_j= 1/p_j)$, where $p_j$ is the total number of Principal Acts affected by $a_j$. If multiple amendments occur to a principal act $i$ in term $t$, we sum the weighted amendments to give a weighted estimate of the total change to an act. This allows us to account for minor amendments, without excluding them entirely from our analysis, as in @maltzman2008. We apply this weight as follows:
+
+$$
+W(\text{enactment classification})_{it}= 
+\begin{dcases}
+    \sum_{j=1}^{m}W_j,& \text{if } \text{enactments}_{it} \geq 2\\
+    1,              & \text{otherwise}
+\end{dcases}
+$$
+
+```{r wtamends, fig.cap="weighted early amendments", fig.ncol = 2, out.width = "50%", fig.align = "center", fig.subcap=c('Histogram of weighted amendments','Weighted amendments over time')}
+
+
+p1h<-ggplot(data = model_set , aes( wt_multiple_amends))+
+  geom_histogram(binwidth = 1)+theme_bw()+xlab('weighted multiple amendments')
+
+p1<-ggplot(data = model_set , aes(parliament, wt_multiple_amends))+
+  geom_jitter(alpha=0.1,  height=0.02)+geom_smooth( )+theme_bw()+xlab('Parliament #')+
+  ylab('weighted multiple amendments')
+
+  
+p1h
+p1
+
+ 
+ 
+```
+
+The pattern in Figure \@ref(fig:wtamends) shows a similar, though less severe pattern of growth since 1901.
+
+## Structural covariates
+
+In the article, we argue that a number of factors specific to the law in question condition the scope for making multiple amendments to a single piece of legislation in the same parliament besides the political conditions in the parliamentary term, including the area of law, the complexity of the legislation, the number of previous amendments, and the theoretical amount of time left in the parliament to make new laws (i.e. not accounting for early elections). Here we give a brief summary of these variables.
+
+```{r areafig, fig.cap="Enactments over time, by area of law",fig.height=unit(10,"cm"), fig.align = "center"}
+
+model_set_subject<-model_set|>group_by(subject, parliament)|>
+  summarise(count=n())
+
+model_set_subject$subject[model_set_subject$subject=="Social Security, Aged Care, Housing, and Superannuation"]<-"Social Security"
+
+p1<-ggplot(data = model_set_subject , aes(y=count, x=parliament))+
+  geom_line()+facet_wrap(~subject, ncol=2)+ theme_bw()
+p1
+```
+
+In Figure \@ref(fig:areafig), we show enactment events (both principal and amending), categorised by area of law.
+
+```{r, covariates, fig.cap="Enactment contexts: act complexity, cumulative amendments, and time until next election.",fig.height=unit(2,"cm"),fig.ncol = 1, out.width = "100%", fig.align = "center", fig.subcap=c('Pages in Act','cumulative amendments','time left in parliament')}
+
+ 
+
+
+p2<-ggplot(data = model_set , aes(x=parliament,y=legPages))+
+  geom_point(alpha=0.2)+ geom_smooth()+theme_bw()+
+  ylab('# Pages per Act')+
+  geom_text(data = data.frame(x = 32, y = 1700, label = "Corporations Act 2001"),
+mapping = aes(x = x, y = y, label = label),inherit.aes = FALSE)
+
+p3<-ggplot(data = model_set , aes(x=parliament,y=cum_amendments, groups=principal_id))+
+  geom_line(alpha=0.2)+ geom_smooth()+theme_bw()+
+  ylab('cum. wt. enactments')+
+  geom_text(data = data.frame(x = 32.6427511713131, y = 156.765744400882, label = "Income Tax Assessment Act 1936"),
+mapping = aes(x = x, y = y, label = label),
+angle = 20L, inherit.aes = FALSE) + 
+geom_text(data = data.frame(x = 38.834839122412, y = 110.6327012132209, label = "Customs Act 1901"),
+mapping = aes(x = x, y = y, label = label),
+angle = 20L, inherit.aes = FALSE)
+
+p4<-ggplot(data = model_set , aes(x=parliament,y=parl_time_left))+
+  geom_point(alpha=0.1)+ geom_smooth()+theme_bw()+
+  ylab('Days to next election')
+
+
+p2
+p3
+p4
+
+```
+
+Next, in Figure \@ref(fig:covariates), we show important enactment contexts including act complexity, cumulative amendments, and time until next election.
+
+## Full results
+
+In this section, we provide full results from our models which propose to measure the quality of legislation as enacted, through early amendments to legislation. We model multiple enactments within a parliamentary term as a regression with importance weights.
+
+# Validation
+
+## Convergent validity
+
+In convergent validity, we test the extent to which our separate measures of concepts converge. In our case, we compare our measure of multiple enactment events with other measures of legislative quality: text-based measures. We give more details of these measures in the following appendices. Our main approach for convergence validity will be bivariate tests of statistical association: correlation, t-tests, and chi-squared tests.
+
+Our principal output measure for legislative quality is multiple enactment events, as in Table \@ref(tab:classification). We also measure the extent to which multiple enactment events were unexpected, given the expectations of the model. We use our model output to create residuals ($r_i=y_i-\hat{y}_i$ for OLS, and for logistic regression, the Pearson residuals $r_i=\frac{e_i}{\sqrt{\hat{p}_i(1-\hat{p}_i)}}$ where $\hat{p}_i$ is the predicted probability of $y_i$ [@agresti2013]) . These residuals give us a sense of the urgency of the second amendment act, suggesting unforeseen contingencies in application of the law.
+
+Our text-based measure tracks calls for amendment in articles published by the Australian Law Reform Commission, and by professional legal journals (sourced from the Australia and New Zealand Legal Information Institute).
+
+# Text analysis
+
+## Descriptive statistics of Acts covered by Austlii publications
+
+### By decade
+
+### By area of law
+
+### Specific Reference to publications dataset
+
+## LLM content analysis: reliability with human coders.
+
+### Cohen's kappa: evaluative intent
+
+### Cohen's kappa: recommendation to change
+
+## Zero-Shot text annotation codebook
+
+### Task one: Evaluative intent
+
+#### Evaluative intent 1, without examples
+
+#### Evaluative intent 1, with examples
+
+### Task two: Recommendation to change legislation
+
+#### Recommendation to change 1, without examples
+
+#### Recommendation to change 2, with examples
